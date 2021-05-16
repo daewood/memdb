@@ -1,5 +1,5 @@
-// module github.com/daewood/memdb
-module memdb
+module github.com/daewood/memdb
+// module memdb
 
 go 1.16
 

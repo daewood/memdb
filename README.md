@@ -1,5 +1,5 @@
 # memdb
-golang memory btree database
+golang memory btree database, boltdb like interface
 
 ```
 func main() {
