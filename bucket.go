@@ -42,9 +42,8 @@ type Bucket struct {
 	name string
 }
 
-func newBucket(tx *Tx, name []byte) *Bucket {
-	tr := btree.New(btreeDegree)
-	return &Bucket{tx: tx, tr: &tree{bt: tr}, name: string(name)}
+func getBucket(tx *Tx, tr *tree, name []byte) *Bucket {
+	return &Bucket{tx: tx, tr: tr, name: string(name)}
 }
 
 func (s *Bucket) Put(k, v []byte) error {

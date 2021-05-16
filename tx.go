@@ -92,7 +92,7 @@ func (tx *Tx) Bucket(name []byte) (*Bucket, error) {
 	if !ok {
 		return nil, ErrStoreNotFound
 	}
-	return &Bucket{tx: tx, tr: tr, name: string(name)}, nil
+	return getBucket(tx, tr, name), nil
 }
 
 func (tx *Tx) CreateBucket(name []byte) (*Bucket, error) {
@@ -119,7 +119,7 @@ func (tx *Tx) CreateBucket(name []byte) (*Bucket, error) {
 	tx.onRollback = append(tx.onRollback, func() {
 		delete(tx.ng.stores, string(name))
 	})
-	return &Bucket{tx: tx, tr: tr, name: string(name)}, nil
+	return getBucket(tx, tr, name), nil
 }
 
 func (tx *Tx) DeleteBucket(name []byte) error {
