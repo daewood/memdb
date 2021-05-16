@@ -1,7 +1,7 @@
 # memdb
 golang memory btree database
 
-'''
+```
 func main() {
 	ng := memdb.New()
 	defer ng.Close()
@@ -72,4 +72,4 @@ func main() {
 	}
 	log.Printf("%s", v)
 }
-'''
+```
