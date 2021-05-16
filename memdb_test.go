@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func builder() (*Engine, func()) {
-	ng := New()
+func builder() (*DB, func()) {
+	ng := NewDB()
 	return ng, func() { ng.Close() }
 }
 
@@ -58,8 +58,7 @@ func TestTransactionCommitRollback(t *testing.T) {
 		tx, err := ng.Begin(ctx, true)
 		require.NoError(t, err)
 
-		require.NoError(t, tx.CreateStore([]byte("test")))
-		st, err := tx.GetStore([]byte("test"))
+		st, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 		err = st.Put([]byte("a"), []byte("b"))
 		require.NoError(t, err)
@@ -74,7 +73,7 @@ func TestTransactionCommitRollback(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		_, err = tx.GetStore([]byte("test"))
+		_, err = tx.Bucket([]byte("test"))
 		require.Error(t, err)
 	})
 
@@ -130,7 +129,7 @@ func TestTransactionCommitRollback(t *testing.T) {
 		require.NoError(t, err)
 
 		// create store for testing store methods
-		err = tx.CreateStore([]byte("store1"))
+		_, err = tx.CreateBucket([]byte("store1"))
 		require.NoError(t, err)
 
 		err = tx.Commit()
@@ -141,7 +140,7 @@ func TestTransactionCommitRollback(t *testing.T) {
 		defer tx.Rollback()
 
 		// fetch the store and the index
-		st, err := tx.GetStore([]byte("store1"))
+		st, err := tx.Bucket([]byte("store1"))
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -149,8 +148,8 @@ func TestTransactionCommitRollback(t *testing.T) {
 			err  error
 			fn   func(*error)
 		}{
-			{"CreateStore", ErrTransactionReadOnly, func(err *error) { *err = tx.CreateStore([]byte("store")) }},
-			{"DropStore", ErrTransactionReadOnly, func(err *error) { *err = tx.DropStore([]byte("store")) }},
+			{"CreateStore", ErrTransactionReadOnly, func(err *error) { _, *err = tx.CreateBucket([]byte("store")) }},
+			{"DropStore", ErrTransactionReadOnly, func(err *error) { *err = tx.DeleteBucket([]byte("store")) }},
 			{"StorePut", ErrTransactionReadOnly, func(err *error) { *err = st.Put([]byte("id"), nil) }},
 			{"StoreDelete", ErrTransactionReadOnly, func(err *error) { *err = st.Delete([]byte("id")) }},
 			{"StoreTruncate", ErrTransactionReadOnly, func(err *error) { *err = st.Truncate() }},
@@ -170,32 +169,32 @@ func TestTransactionCommitRollback(t *testing.T) {
 		// this test checks if rollback undoes data changes correctly and if commit keeps data correctly
 		tests := []struct {
 			name    string
-			initFn  func(*Tx) error
+			initFn  func(*Tx) (*Bucket, error)
 			writeFn func(*Tx, *error)
 			readFn  func(*Tx, *error)
 		}{
 			{
 				"CreateStore",
 				nil,
-				func(tx *Tx, err *error) { *err = tx.CreateStore([]byte("store")) },
-				func(tx *Tx, err *error) { _, *err = tx.GetStore([]byte("store")) },
+				func(tx *Tx, err *error) { _, *err = tx.CreateBucket([]byte("store")) },
+				func(tx *Tx, err *error) { _, *err = tx.Bucket([]byte("store")) },
 			},
 			{
 				"DropStore",
-				func(tx *Tx) error { return tx.CreateStore([]byte("store")) },
-				func(tx *Tx, err *error) { *err = tx.DropStore([]byte("store")) },
-				func(tx *Tx, err *error) { *err = tx.CreateStore([]byte("store")) },
+				func(tx *Tx) (*Bucket, error) { return tx.CreateBucket([]byte("store")) },
+				func(tx *Tx, err *error) { *err = tx.DeleteBucket([]byte("store")) },
+				func(tx *Tx, err *error) { _, *err = tx.CreateBucket([]byte("store")) },
 			},
 			{
 				"StorePut",
-				func(tx *Tx) error { return tx.CreateStore([]byte("store")) },
+				func(tx *Tx) (*Bucket, error) { return tx.CreateBucket([]byte("store")) },
 				func(tx *Tx, err *error) {
-					st, er := tx.GetStore([]byte("store"))
+					st, er := tx.Bucket([]byte("store"))
 					require.NoError(t, er)
 					require.NoError(t, st.Put([]byte("foo"), []byte("FOO")))
 				},
 				func(tx *Tx, err *error) {
-					st, er := tx.GetStore([]byte("store"))
+					st, er := tx.Bucket([]byte("store"))
 					require.NoError(t, er)
 					_, *err = st.Get([]byte("foo"))
 				},
@@ -216,7 +215,7 @@ func TestTransactionCommitRollback(t *testing.T) {
 						require.NoError(t, err)
 						defer tx.Rollback()
 
-						err = test.initFn(tx)
+						_, err = test.initFn(tx)
 						require.NoError(t, err)
 						err = tx.Commit()
 						require.NoError(t, err)
@@ -256,7 +255,7 @@ func TestTransactionCommitRollback(t *testing.T) {
 						require.NoError(t, err)
 						defer tx.Rollback()
 
-						err = test.initFn(tx)
+						_, err = test.initFn(tx)
 						require.NoError(t, err)
 						err = tx.Commit()
 						require.NoError(t, err)
@@ -291,8 +290,8 @@ func TestTransactionCommitRollback(t *testing.T) {
 		}{
 			{
 				"CreateStore",
-				func(tx *Tx, err *error) { *err = tx.CreateStore([]byte("store")) },
-				func(tx *Tx, err *error) { _, *err = tx.GetStore([]byte("store")) },
+				func(tx *Tx, err *error) { _, *err = tx.CreateBucket([]byte("store")) },
+				func(tx *Tx, err *error) { _, *err = tx.Bucket([]byte("store")) },
 			},
 		}
 
@@ -331,10 +330,7 @@ func TestTransactionCreateStore(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		err = tx.CreateStore([]byte("store"))
-		require.NoError(t, err)
-
-		st, err := tx.GetStore([]byte("store"))
+		st, err := tx.CreateBucket([]byte("store"))
 		require.NoError(t, err)
 		require.NotNil(t, st)
 	})
@@ -350,9 +346,9 @@ func TestTransactionCreateStore(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		err = tx.CreateStore([]byte("store"))
+		_, err = tx.CreateBucket([]byte("store"))
 		require.NoError(t, err)
-		err = tx.CreateStore([]byte("store"))
+		_, err = tx.CreateBucket([]byte("store"))
 		require.Equal(t, ErrStoreAlreadyExists, err)
 	})
 
@@ -369,13 +365,13 @@ func TestTransactionCreateStore(t *testing.T) {
 		defer tx.Rollback()
 
 		cancel()
-		err = tx.CreateStore([]byte("store"))
+		_, err = tx.CreateBucket([]byte("store"))
 		require.Equal(t, context.Canceled, err)
 	})
 }
 
-// TestTransactionGetStore verifies GetStore behaviour.
-func TestTransactionGetStore(t *testing.T) {
+// TestTransactionBucket verifies Bucket behaviour.
+func TestTransactionBucket(t *testing.T) {
 	t.Run("Should fail if store not found", func(t *testing.T) {
 		ng, cleanup := builder()
 		defer cleanup()
@@ -387,7 +383,7 @@ func TestTransactionGetStore(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		_, err = tx.GetStore([]byte("store"))
+		_, err = tx.Bucket([]byte("store"))
 		require.Equal(t, ErrStoreNotFound, err)
 	})
 
@@ -403,18 +399,18 @@ func TestTransactionGetStore(t *testing.T) {
 		defer tx.Rollback()
 
 		// create two stores
-		err = tx.CreateStore([]byte("storea"))
+		_, err = tx.CreateBucket([]byte("storea"))
 		require.NoError(t, err)
 
-		err = tx.CreateStore([]byte("storeb"))
+		_, err = tx.CreateBucket([]byte("storeb"))
 		require.NoError(t, err)
 
 		// fetch first store
-		sta, err := tx.GetStore([]byte("storea"))
+		sta, err := tx.Bucket([]byte("storea"))
 		require.NoError(t, err)
 
 		// fetch second store
-		stb, err := tx.GetStore([]byte("storeb"))
+		stb, err := tx.Bucket([]byte("storeb"))
 		require.NoError(t, err)
 
 		// insert data in first store
@@ -444,12 +440,12 @@ func TestTransactionGetStore(t *testing.T) {
 		defer tx.Rollback()
 
 		// create two stores
-		err = tx.CreateStore([]byte("store"))
+		_, err = tx.CreateBucket([]byte("store"))
 		require.NoError(t, err)
 
 		cancel()
 
-		_, err = tx.GetStore([]byte("store"))
+		_, err = tx.Bucket([]byte("store"))
 		require.Equal(t, context.Canceled, err)
 	})
 }
@@ -467,13 +463,13 @@ func TestTransactionDropStore(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		err = tx.CreateStore([]byte("store"))
+		_, err = tx.CreateBucket([]byte("store"))
 		require.NoError(t, err)
 
-		err = tx.DropStore([]byte("store"))
+		err = tx.DeleteBucket([]byte("store"))
 		require.NoError(t, err)
 
-		_, err = tx.GetStore([]byte("store"))
+		_, err = tx.Bucket([]byte("store"))
 		require.Equal(t, ErrStoreNotFound, err)
 	})
 
@@ -488,7 +484,7 @@ func TestTransactionDropStore(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		err = tx.DropStore([]byte("store"))
+		err = tx.DeleteBucket([]byte("store"))
 		require.Equal(t, ErrStoreNotFound, err)
 	})
 
@@ -505,27 +501,27 @@ func TestTransactionDropStore(t *testing.T) {
 		defer tx.Rollback()
 
 		// create two stores
-		err = tx.CreateStore([]byte("store"))
+		_, err = tx.CreateBucket([]byte("store"))
 		require.NoError(t, err)
 
 		cancel()
 
-		err = tx.DropStore([]byte("store"))
+		err = tx.DeleteBucket([]byte("store"))
 		require.Equal(t, context.Canceled, err)
 	})
 }
 
-func storeBuilder(t testing.TB) (*Store, func()) {
+func storeBuilder(t testing.TB) (*Bucket, func()) {
 	return storeBuilderWithContext(context.Background(), t)
 }
 
-func storeBuilderWithContext(ctx context.Context, t testing.TB) (*Store, func()) {
+func storeBuilderWithContext(ctx context.Context, t testing.TB) (*Bucket, func()) {
 	ng, cleanup := builder()
 	tx, err := ng.Begin(ctx, true)
 	require.NoError(t, err)
-	err = tx.CreateStore([]byte("test"))
+	_, err = tx.CreateBucket([]byte("test"))
 	require.NoError(t, err)
-	st, err := tx.GetStore([]byte("test"))
+	st, err := tx.Bucket([]byte("test"))
 	require.NoError(t, err)
 	return st, func() {
 		defer cleanup()
@@ -951,9 +947,9 @@ func TestStoreDelete(t *testing.T) {
 
 		tx, err := ng.Begin(context.Background(), true)
 		require.NoError(t, err)
-		err = tx.CreateStore([]byte("test"))
+		_, err = tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
-		st, err := tx.GetStore([]byte("test"))
+		st, err := tx.Bucket([]byte("test"))
 		require.NoError(t, err)
 
 		err = st.Put([]byte("foo"), []byte("FOO"))
@@ -981,7 +977,7 @@ func TestStoreDelete(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		st, err = tx.GetStore([]byte("test"))
+		st, err = tx.Bucket([]byte("test"))
 		require.NoError(t, err)
 
 		v, err = st.Get([]byte("foo"))
@@ -1062,7 +1058,7 @@ func TestStoreNextSequence(t *testing.T) {
 		tx, err := ng.Begin(context.Background(), true)
 
 		require.NoError(t, err)
-		err = tx.CreateStore([]byte("test"))
+		_, err = tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -1071,7 +1067,7 @@ func TestStoreNextSequence(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		st, err := tx.GetStore([]byte("test"))
+		st, err := tx.Bucket([]byte("test"))
 		require.NoError(t, err)
 
 		_, err = st.NextSequence()
@@ -1099,9 +1095,9 @@ func TestStoreNextSequence(t *testing.T) {
 		tx, err := ng.Begin(context.Background(), true)
 
 		require.NoError(t, err)
-		err = tx.CreateStore([]byte("test"))
+		_, err = tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
-		st, err := tx.GetStore([]byte("test"))
+		st, err := tx.Bucket([]byte("test"))
 		require.NoError(t, err)
 
 		s1, err := st.NextSequence()
@@ -1114,7 +1110,7 @@ func TestStoreNextSequence(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		st, err = tx.GetStore([]byte("test"))
+		st, err = tx.Bucket([]byte("test"))
 		require.NoError(t, err)
 		s2, err := st.NextSequence()
 		require.NoError(t, err)
@@ -1135,7 +1131,7 @@ func TestStoreNextSequence(t *testing.T) {
 }
 
 func TestMemDB(t *testing.T) {
-	ng := New()
+	ng := NewDB()
 	defer ng.Close()
 
 	//writable
@@ -1143,12 +1139,12 @@ func TestMemDB(t *testing.T) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = tx.CreateStore([]byte("test"))
+	_, err = tx.CreateBucket([]byte("test"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	st, err := tx.GetStore([]byte("test"))
+	st, err := tx.Bucket([]byte("test"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1193,7 +1189,7 @@ func TestMemDB(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	st, err = tx.GetStore([]byte("test"))
+	st, err = tx.Bucket([]byte("test"))
 	if err != nil {
 		log.Fatal(err)
 	}

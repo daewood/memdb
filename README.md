@@ -11,12 +11,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = tx.CreateStore([]byte("test"))
+	_, err = tx.CreateBucket([]byte("test"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	st, err := tx.GetStore([]byte("test"))
+	st, err := tx.Bucket([]byte("test"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func main() {
 	}
 	defer tx.Rollback()
 
-	st, err = tx.GetStore([]byte("test"))
+	st, err = tx.Bucket([]byte("test"))
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -16,7 +16,7 @@ type memItem struct {
 	// during the current transaction
 	// but before rollback or commit.
 	deleted bool
-	ttl     uint64
+	// ttl     uint64
 }
 
 func (i *memItem) Key() []byte {
@@ -35,14 +35,19 @@ func (i *memItem) Less(than btree.Item) bool {
 	return bytes.Compare(i.k, than.(*memItem).k) < 0
 }
 
-// Store implements an Store.
-type Store struct {
+// Bucket implements an Bucket.
+type Bucket struct {
 	tr   *tree
 	tx   *Tx
 	name string
 }
 
-func (s *Store) Put(k, v []byte) error {
+func newBucket(tx *Tx, name []byte) *Bucket {
+	tr := btree.New(btreeDegree)
+	return &Bucket{tx: tx, tr: &tree{bt: tr}, name: string(name)}
+}
+
+func (s *Bucket) Put(k, v []byte) error {
 	select {
 	case <-s.tx.ctx.Done():
 		return s.tx.ctx.Err()
@@ -91,7 +96,7 @@ func (s *Store) Put(k, v []byte) error {
 	return nil
 }
 
-func (s *Store) Get(k []byte) ([]byte, error) {
+func (s *Bucket) Get(k []byte) ([]byte, error) {
 	select {
 	case <-s.tx.ctx.Done():
 		return nil, s.tx.ctx.Err()
@@ -120,7 +125,7 @@ func (s *Store) Get(k []byte) ([]byte, error) {
 // every time we remove an item from it,
 // which causes iterators to behave incorrectly when looping
 // and deleting at the same time.
-func (s *Store) Delete(k []byte) error {
+func (s *Bucket) Delete(k []byte) error {
 	select {
 	case <-s.tx.ctx.Done():
 		return s.tx.ctx.Err()
@@ -168,7 +173,7 @@ func (s *Store) Delete(k []byte) error {
 // Truncate replaces the current tree by a new
 // one. The current tree will be garbage collected
 // once the transaction is commited.
-func (s *Store) Truncate() error {
+func (s *Bucket) Truncate() error {
 	select {
 	case <-s.tx.ctx.Done():
 		return s.tx.ctx.Err()
@@ -191,7 +196,7 @@ func (s *Store) Truncate() error {
 }
 
 // NextSequence returns a monotonically increasing integer.
-func (s *Store) NextSequence() (uint64, error) {
+func (s *Bucket) NextSequence() (uint64, error) {
 	select {
 	case <-s.tx.ctx.Done():
 		return 0, s.tx.ctx.Err()
@@ -208,7 +213,7 @@ func (s *Store) NextSequence() (uint64, error) {
 }
 
 // Iterator creates an iterator with the given options.
-func (s *Store) Iterator(reverse bool) Iterator {
+func (s *Bucket) Iterator(reverse bool) Iterator {
 	return &iterator{
 		tx:      s.tx,
 		tr:      s.tr,
