@@ -6,13 +6,41 @@ import (
 	"github.com/google/btree"
 )
 
+// The degree of btrees.
+// This value is arbitrary and has been selected after
+// a few benchmarks.
+const btreeDegree = 12
+
 // tree is a thread safe wrapper aroung BTree.
 // It prevents modifying and rebalancing the btree while other
 // routines are reading it.
 type tree struct {
-	bt *btree.BTree
+	bt       *btree.BTree
+	m        sync.RWMutex
+	sequence uint64
+}
 
-	m sync.RWMutex
+func newTree() *tree {
+	return &tree{bt: btree.New(btreeDegree)}
+}
+
+func (t *tree) NextSequence() uint64 {
+	t.m.Lock()
+	defer t.m.Unlock()
+	t.sequence++
+	return t.sequence
+}
+
+func (t *tree) SetSequence(seq uint64) {
+	t.m.Lock()
+	defer t.m.Unlock()
+	t.sequence = seq
+}
+
+func (t *tree) Sequence() uint64 {
+	t.m.RLock()
+	defer t.m.RUnlock()
+	return t.sequence
 }
 
 func (t *tree) Get(key btree.Item) btree.Item {

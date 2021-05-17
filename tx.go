@@ -3,8 +3,6 @@ package memdb
 import (
 	"context"
 	"sync"
-
-	"github.com/google/btree"
 )
 
 // This implements the DB.Transaction type.
@@ -92,7 +90,7 @@ func (tx *Tx) Bucket(name []byte) (*Bucket, error) {
 	if !ok {
 		return nil, ErrStoreNotFound
 	}
-	return getBucket(tx, tr, name), nil
+	return newBucket(tx, tr, name), nil
 }
 
 func (tx *Tx) CreateBucket(name []byte) (*Bucket, error) {
@@ -111,15 +109,14 @@ func (tx *Tx) CreateBucket(name []byte) (*Bucket, error) {
 		return nil, ErrStoreAlreadyExists
 	}
 
-	btr := btree.New(btreeDegree)
-	tr := &tree{bt: btr}
+	tr := newTree()
 
 	tx.ng.stores[string(name)] = tr
 	// on rollback, remove the bucket from the list of stores
 	tx.onRollback = append(tx.onRollback, func() {
 		delete(tx.ng.stores, string(name))
 	})
-	return getBucket(tx, tr, name), nil
+	return newBucket(tx, tr, name), nil
 }
 
 func (tx *Tx) DeleteBucket(name []byte) error {

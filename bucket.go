@@ -4,26 +4,27 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/btree"
 )
 
 // item implements an Item.
 // it is also used as a btree.Item.
-type memItem struct {
+type mItem struct {
 	k, v []byte
 	// set to true if the item has been deleted
 	// during the current transaction
 	// but before rollback or commit.
 	deleted bool
-	// ttl     uint64
+	ttl     uint64
 }
 
-func (i *memItem) Key() []byte {
+func (i *mItem) Key() []byte {
 	return i.k
 }
 
-func (i *memItem) ValueCopy(buf []byte) ([]byte, error) {
+func (i *mItem) ValueCopy(buf []byte) ([]byte, error) {
 	if len(buf) < len(i.v) {
 		buf = make([]byte, len(i.v))
 	}
@@ -31,8 +32,8 @@ func (i *memItem) ValueCopy(buf []byte) ([]byte, error) {
 	return buf[:n], nil
 }
 
-func (i *memItem) Less(than btree.Item) bool {
-	return bytes.Compare(i.k, than.(*memItem).k) < 0
+func (i *mItem) Less(than btree.Item) bool {
+	return bytes.Compare(i.k, than.(*mItem).k) < 0
 }
 
 // Bucket implements an Bucket.
@@ -42,18 +43,18 @@ type Bucket struct {
 	name string
 }
 
-func getBucket(tx *Tx, tr *tree, name []byte) *Bucket {
+func newBucket(tx *Tx, tr *tree, name []byte) *Bucket {
 	return &Bucket{tx: tx, tr: tr, name: string(name)}
 }
 
-func (s *Bucket) Put(k, v []byte) error {
+func (b *Bucket) Put(k, v []byte) error {
 	select {
-	case <-s.tx.ctx.Done():
-		return s.tx.ctx.Err()
+	case <-b.tx.ctx.Done():
+		return b.tx.ctx.Err()
 	default:
 	}
 
-	if !s.tx.writable {
+	if !b.tx.writable {
 		return ErrTransactionReadOnly
 	}
 
@@ -65,18 +66,18 @@ func (s *Bucket) Put(k, v []byte) error {
 		return errors.New("empty values are forbidden")
 	}
 
-	it := &memItem{k: k}
+	it := &mItem{k: k}
 	// if there is an existing value, fetch it
 	// and overwrite it directly using the pointer.
-	if i := s.tr.Get(it); i != nil {
-		cur := i.(*memItem)
+	if i := b.tr.Get(it); i != nil {
+		cur := i.(*mItem)
 
 		oldv, oldDeleted := cur.v, cur.deleted
 		cur.v = v
 		cur.deleted = false
 
 		// on rollback replace the new value by the old value
-		s.tx.onRollback = append(s.tx.onRollback, func() {
+		b.tx.onRollback = append(b.tx.onRollback, func() {
 			cur.v = oldv
 			cur.deleted = oldDeleted
 		})
@@ -85,37 +86,39 @@ func (s *Bucket) Put(k, v []byte) error {
 	}
 
 	it.v = v
-	s.tr.ReplaceOrInsert(it)
+	// TODO: move to index
+	it.ttl = uint64(time.Now().Unix())
+	b.tr.ReplaceOrInsert(it)
 
 	// on rollback delete the new item
-	s.tx.onRollback = append(s.tx.onRollback, func() {
-		s.tr.Delete(it)
+	b.tx.onRollback = append(b.tx.onRollback, func() {
+		b.tr.Delete(it)
 	})
 
 	return nil
 }
 
-func (s *Bucket) Get(k []byte) ([]byte, error) {
+func (b *Bucket) Get(k []byte) ([]byte, error) {
 	select {
-	case <-s.tx.ctx.Done():
-		return nil, s.tx.ctx.Err()
+	case <-b.tx.ctx.Done():
+		return nil, b.tx.ctx.Err()
 	default:
 	}
 
-	it := s.tr.Get(&memItem{k: k})
+	it := b.tr.Get(&mItem{k: k})
 
 	if it == nil {
 		return nil, ErrKeyNotFound
 	}
 
-	i := it.(*memItem)
+	i := it.(*mItem)
 	// don't return items that have been deleted during
 	// this transaction.
 	if i.deleted {
 		return nil, ErrKeyNotFound
 	}
 
-	return it.(*memItem).v, nil
+	return it.(*mItem).v, nil
 }
 
 // Delete marks k for deletion. The item will be actually
@@ -124,23 +127,23 @@ func (s *Bucket) Get(k []byte) ([]byte, error) {
 // every time we remove an item from it,
 // which causes iterators to behave incorrectly when looping
 // and deleting at the same time.
-func (s *Bucket) Delete(k []byte) error {
+func (b *Bucket) Delete(k []byte) error {
 	select {
-	case <-s.tx.ctx.Done():
-		return s.tx.ctx.Err()
+	case <-b.tx.ctx.Done():
+		return b.tx.ctx.Err()
 	default:
 	}
 
-	if !s.tx.writable {
+	if !b.tx.writable {
 		return ErrTransactionReadOnly
 	}
 
-	it := s.tr.Get(&memItem{k: k})
+	it := b.tr.Get(&mItem{k: k})
 	if it == nil {
 		return ErrKeyNotFound
 	}
 
-	i := it.(*memItem)
+	i := it.(*mItem)
 	// items that have been deleted during
 	// this transaction must be ignored.
 	if i.deleted {
@@ -156,14 +159,14 @@ func (s *Bucket) Delete(k []byte) error {
 	i.deleted = true
 
 	// on rollback set the deleted flag to false.
-	s.tx.onRollback = append(s.tx.onRollback, func() {
+	b.tx.onRollback = append(b.tx.onRollback, func() {
 		i.deleted = false
 	})
 
 	// on commit, remove the item from the tree.
-	s.tx.onCommit = append(s.tx.onCommit, func() {
+	b.tx.onCommit = append(b.tx.onCommit, func() {
 		if i.deleted {
-			s.tr.Delete(i)
+			b.tr.Delete(i)
 		}
 	})
 	return nil
@@ -172,52 +175,76 @@ func (s *Bucket) Delete(k []byte) error {
 // Truncate replaces the current tree by a new
 // one. The current tree will be garbage collected
 // once the transaction is commited.
-func (s *Bucket) Truncate() error {
+func (b *Bucket) Truncate() error {
 	select {
-	case <-s.tx.ctx.Done():
-		return s.tx.ctx.Err()
+	case <-b.tx.ctx.Done():
+		return b.tx.ctx.Err()
 	default:
 	}
 
-	if !s.tx.writable {
+	if !b.tx.writable {
 		return ErrTransactionReadOnly
 	}
 
-	old := s.tr
-	s.tr = &tree{bt: btree.New(btreeDegree)}
+	old := b.tr
+	b.tr = &tree{bt: btree.New(btreeDegree)}
 
 	// on rollback replace the new tree by the old one.
-	s.tx.onRollback = append(s.tx.onRollback, func() {
-		s.tr = old
+	b.tx.onRollback = append(b.tx.onRollback, func() {
+		b.tr = old
 	})
 
 	return nil
 }
 
 // NextSequence returns a monotonically increasing integer.
-func (s *Bucket) NextSequence() (uint64, error) {
+func (b *Bucket) NextSequence() (uint64, error) {
 	select {
-	case <-s.tx.ctx.Done():
-		return 0, s.tx.ctx.Err()
+	case <-b.tx.ctx.Done():
+		return 0, b.tx.ctx.Err()
 	default:
 	}
 
-	if !s.tx.writable {
+	if !b.tx.writable {
 		return 0, ErrTransactionReadOnly
 	}
 
-	s.tx.ng.sequences[s.name]++
-
-	return s.tx.ng.sequences[s.name], nil
+	return b.tr.NextSequence(), nil
 }
 
-// Iterator creates an iterator with the given options.
-func (s *Bucket) Iterator(reverse bool) Iterator {
+func (b *Bucket) Sequence() uint64 {
+	return b.tr.Sequence()
+}
+
+func (b *Bucket) SetSequence(seq uint64) error {
+	select {
+	case <-b.tx.ctx.Done():
+		return b.tx.ctx.Err()
+	default:
+	}
+
+	if !b.tx.writable {
+		return ErrTransactionReadOnly
+	}
+	b.tr.SetSequence(seq)
+	return nil
+}
+
+func (b *Bucket) Tx() *Tx {
+	return b.tx
+}
+
+func (b *Bucket) Writable() bool {
+	return b.tx.writable
+}
+
+// Iterator creates an iterator with the given optionb.
+func (b *Bucket) Iterator(reverse bool) Iterator {
 	return &iterator{
-		tx:      s.tx,
-		tr:      s.tr,
+		tx:      b.tx,
+		tr:      b.tr,
 		reverse: reverse,
-		ch:      make(chan *memItem),
+		ch:      make(chan *mItem),
 		closed:  make(chan struct{}),
 	}
 }
@@ -227,8 +254,8 @@ type iterator struct {
 	tx      *Tx
 	reverse bool
 	tr      *tree
-	item    *memItem // current item
-	ch      chan *memItem
+	item    *mItem // current item
+	ch      chan *mItem
 	closed  chan struct{} // closed by the goroutine when it's shutdown
 	ctx     context.Context
 	cancel  func()
@@ -243,7 +270,7 @@ func (it *iterator) Seek(pivot []byte) {
 		<-it.closed
 	}
 
-	it.ch = make(chan *memItem)
+	it.ch = make(chan *mItem)
 	it.closed = make(chan struct{})
 	it.ctx, it.cancel = context.WithCancel(it.tx.ctx)
 
@@ -258,7 +285,7 @@ func (it *iterator) Seek(pivot []byte) {
 func (it *iterator) runIterator(pivot []byte) {
 	it.tx.wg.Add(1)
 
-	go func(ctx context.Context, ch chan *memItem, tr *tree) {
+	go func(ctx context.Context, ch chan *mItem, tr *tree) {
 		defer it.tx.wg.Done()
 		defer close(ch)
 		defer close(it.closed)
@@ -270,7 +297,7 @@ func (it *iterator) runIterator(pivot []byte) {
 			default:
 			}
 
-			itm := i.(*memItem)
+			itm := i.(*mItem)
 			if itm.deleted {
 				return true
 			}
@@ -287,13 +314,13 @@ func (it *iterator) runIterator(pivot []byte) {
 			if len(pivot) == 0 {
 				tr.Descend(iter)
 			} else {
-				tr.DescendLessOrEqual(&memItem{k: pivot}, iter)
+				tr.DescendLessOrEqual(&mItem{k: pivot}, iter)
 			}
 		} else {
 			if len(pivot) == 0 {
 				tr.Ascend(iter)
 			} else {
-				tr.AscendGreaterOrEqual(&memItem{k: pivot}, iter)
+				tr.AscendGreaterOrEqual(&mItem{k: pivot}, iter)
 			}
 		}
 	}(it.ctx, it.ch, it.tr)

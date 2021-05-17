@@ -53,12 +53,6 @@ type Item interface {
 	ValueCopy([]byte) ([]byte, error)
 }
 
-// The degree of btrees.
-// This value is arbitrary and has been selected after
-// a few benchmarks.
-// It may be improved after thorough testing.
-const btreeDegree = 12
-
 // DB is a simple memory DB implementation that stores data in
 // an in-memory Btree. It is not thread safe.
 type DB struct {
