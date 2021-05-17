@@ -56,16 +56,14 @@ type Item interface {
 // DB is a simple memory DB implementation that stores data in
 // an in-memory Btree. It is not thread safe.
 type DB struct {
-	closed    bool
-	stores    map[string]*tree
-	sequences map[string]uint64
+	closed bool
+	stores map[string]*tree
 }
 
 // NewDB creates an in-memory DB.
 func NewDB() *DB {
 	return &DB{
-		stores:    make(map[string]*tree),
-		sequences: make(map[string]uint64),
+		stores: make(map[string]*tree),
 	}
 }
 
