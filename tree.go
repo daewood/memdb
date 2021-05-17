@@ -111,3 +111,17 @@ func (t *tree) DescendLessOrEqual(pivot btree.Item, iterator btree.ItemIterator)
 		return iterator(i)
 	})
 }
+
+// Has returns true if the value associated with the key
+func (t *tree) Has(key btree.Item) bool {
+	t.m.RLock()
+	defer t.m.RUnlock()
+	return t.bt.Has(key)
+}
+
+// Len returns the number of items in the btree
+func (t *tree) Len() int {
+	t.m.RLock()
+	defer t.m.RUnlock()
+	return t.bt.Len()
+}

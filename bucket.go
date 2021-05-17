@@ -47,6 +47,14 @@ func newBucket(tx *Tx, tr *tree, name []byte) *Bucket {
 	return &Bucket{tx: tx, tr: tr, name: string(name)}
 }
 
+func (b *Bucket) Count() int {
+	return b.tr.Len()
+}
+
+func (b *Bucket) Has(k []byte) bool {
+	return b.tr.Has(&mItem{k: k})
+}
+
 func (b *Bucket) Put(k, v []byte) error {
 	select {
 	case <-b.tx.ctx.Done():
@@ -238,9 +246,9 @@ func (b *Bucket) Writable() bool {
 	return b.tx.writable
 }
 
-// Iterator creates an iterator with the given optionb.
-func (b *Bucket) Iterator(reverse bool) Iterator {
-	return &iterator{
+// Cursor creates an iterator with the given optionb.
+func (b *Bucket) Cursor(reverse bool) *Cursor {
+	return &Cursor{
 		tx:      b.tx,
 		tr:      b.tr,
 		reverse: reverse,
@@ -249,8 +257,8 @@ func (b *Bucket) Iterator(reverse bool) Iterator {
 	}
 }
 
-// iterator uses a goroutine to read from the tree on demand.
-type iterator struct {
+// Cursor uses a goroutine to read from the tree on demand.
+type Cursor struct {
 	tx      *Tx
 	reverse bool
 	tr      *tree
@@ -262,33 +270,35 @@ type iterator struct {
 	err     error
 }
 
-func (it *iterator) Seek(pivot []byte) {
+// Seek moves the iterator to the selected key. If the key doesn't exist, it must move to the
+// next smallest key greater than k.
+func (c *Cursor) Seek(pivot []byte) {
 	// make sure any opened goroutine
 	// is closed before creating a new one
-	if it.cancel != nil {
-		it.cancel()
-		<-it.closed
+	if c.cancel != nil {
+		c.cancel()
+		<-c.closed
 	}
 
-	it.ch = make(chan *mItem)
-	it.closed = make(chan struct{})
-	it.ctx, it.cancel = context.WithCancel(it.tx.ctx)
+	c.ch = make(chan *mItem)
+	c.closed = make(chan struct{})
+	c.ctx, c.cancel = context.WithCancel(c.tx.ctx)
 
-	it.runIterator(pivot)
+	c.runIterator(pivot)
 
-	it.Next()
+	c.Next()
 }
 
 // runIterator creates a goroutine that reads from the tree.
 // Once the goroutine is done reading or if the context is canceled,
 // both ch and closed channels will be closed.
-func (it *iterator) runIterator(pivot []byte) {
-	it.tx.wg.Add(1)
+func (c *Cursor) runIterator(pivot []byte) {
+	c.tx.wg.Add(1)
 
 	go func(ctx context.Context, ch chan *mItem, tr *tree) {
-		defer it.tx.wg.Done()
+		defer c.tx.wg.Done()
 		defer close(ch)
-		defer close(it.closed)
+		defer close(c.closed)
 
 		iter := btree.ItemIterator(func(i btree.Item) bool {
 			select {
@@ -310,7 +320,7 @@ func (it *iterator) runIterator(pivot []byte) {
 			}
 		})
 
-		if it.reverse {
+		if c.reverse {
 			if len(pivot) == 0 {
 				tr.Descend(iter)
 			} else {
@@ -323,45 +333,49 @@ func (it *iterator) runIterator(pivot []byte) {
 				tr.AscendGreaterOrEqual(&mItem{k: pivot}, iter)
 			}
 		}
-	}(it.ctx, it.ch, it.tr)
+	}(c.ctx, c.ch, c.tr)
 }
 
-func (it *iterator) Valid() bool {
-	if it.err != nil {
+// Valid returns whether the iterator is positioned on a valid item or not.
+func (c *Cursor) Valid() bool {
+	if c.err != nil {
 		return false
 	}
 	select {
-	case <-it.tx.ctx.Done():
-		it.err = it.tx.ctx.Err()
+	case <-c.tx.ctx.Done():
+		c.err = c.tx.ctx.Err()
 	default:
 	}
 
-	return it.item != nil && it.err == nil
+	return c.item != nil && c.err == nil
 }
 
 // Read the next item from the goroutine
-func (it *iterator) Next() {
+func (c *Cursor) Next() {
 	select {
-	case it.item = <-it.ch:
-	case <-it.tx.ctx.Done():
-		it.err = it.tx.ctx.Err()
+	case c.item = <-c.ch:
+	case <-c.tx.ctx.Done():
+		c.err = c.tx.ctx.Err()
 	}
 }
 
-func (it *iterator) Err() error {
-	return it.err
+// Err returns an error that invalidated iterator.
+// If Err is not nil then Valid must return false.
+func (c *Cursor) Err() error {
+	return c.err
 }
 
-func (it *iterator) Item() Item {
-	return it.item
+// Item returns the current item.
+func (c *Cursor) Item() Item {
+	return c.item
 }
 
 // Close the inner goroutine.
-func (it *iterator) Close() error {
-	if it.cancel != nil {
-		it.cancel()
-		it.cancel = nil
-		<-it.closed
+func (c *Cursor) Close() error {
+	if c.cancel != nil {
+		c.cancel()
+		c.cancel = nil
+		<-c.closed
 	}
 
 	return nil

@@ -119,6 +119,20 @@ func (tx *Tx) CreateBucket(name []byte) (*Bucket, error) {
 	return newBucket(tx, tr, name), nil
 }
 
+func (tx *Tx) CreateBucketIfNotExists(name []byte) (*Bucket, error) {
+	select {
+	case <-tx.ctx.Done():
+		return nil, tx.ctx.Err()
+	default:
+	}
+
+	tr, ok := tx.ng.stores[string(name)]
+	if ok {
+		return newBucket(tx, tr, name), nil
+	}
+	return tx.CreateBucket(name)
+}
+
 func (tx *Tx) DeleteBucket(name []byte) error {
 	select {
 	case <-tx.ctx.Done():

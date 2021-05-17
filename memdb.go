@@ -24,24 +24,6 @@ var (
 	ErrKeyNotFound = errors.New("key not found")
 )
 
-// An Iterator iterates on keys of a store in lexicographic order.
-type Iterator interface {
-	// Seek moves the iterator to the selected key. If the key doesn't exist, it must move to the
-	// next smallest key greater than k.
-	Seek(k []byte)
-	// Next moves the iterator to the next item.
-	Next()
-	// Err returns an error that invalidated iterator.
-	// If Err is not nil then Valid must return false.
-	Err() error
-	// Valid returns whether the iterator is positioned on a valid item or not.
-	Valid() bool
-	// Item returns the current item.
-	Item() Item
-	// Close releases the resources associated with the iterator.
-	Close() error
-}
-
 // An Item represents a key-value pair.
 type Item interface {
 	// Key returns the key of the item.

@@ -539,7 +539,7 @@ func TestStoreIterator(t *testing.T) {
 			st, cleanup := storeBuilder(t)
 			defer cleanup()
 
-			it := st.Iterator(reverse)
+			it := st.Cursor(reverse)
 			defer it.Close()
 			i := 0
 
@@ -569,7 +569,7 @@ func TestStoreIterator(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		it := st.Iterator(false)
+		it := st.Cursor(false)
 		defer it.Close()
 
 		cancel()
@@ -593,7 +593,7 @@ func TestStoreIterator(t *testing.T) {
 
 		var i uint8 = 1
 		var count int
-		it := st.Iterator(false)
+		it := st.Cursor(false)
 		defer it.Close()
 
 		for it.Seek(nil); it.Valid(); it.Next() {
@@ -621,7 +621,7 @@ func TestStoreIterator(t *testing.T) {
 
 		var i uint8 = 10
 		var count int
-		it := st.Iterator(true)
+		it := st.Cursor(true)
 		defer it.Close()
 
 		for it.Seek(nil); it.Valid(); it.Next() {
@@ -648,7 +648,7 @@ func TestStoreIterator(t *testing.T) {
 
 		var i uint8 = 4
 		var count int
-		it := st.Iterator(false)
+		it := st.Cursor(false)
 		defer it.Close()
 
 		for it.Seek([]byte{i}); it.Valid(); it.Next() {
@@ -675,7 +675,7 @@ func TestStoreIterator(t *testing.T) {
 
 		var i uint8 = 4
 		var count int
-		it := st.Iterator(true)
+		it := st.Cursor(true)
 		defer it.Close()
 
 		for it.Seek([]byte{i}); it.Valid(); it.Next() {
@@ -702,7 +702,7 @@ func TestStoreIterator(t *testing.T) {
 		require.NoError(t, err)
 
 		called := false
-		it := st.Iterator(false)
+		it := st.Cursor(false)
 		defer it.Close()
 
 		for it.Seek([]byte{2}); it.Valid(); it.Next() {
@@ -729,7 +729,7 @@ func TestStoreIterator(t *testing.T) {
 		require.NoError(t, err)
 
 		called := false
-		it := st.Iterator(true)
+		it := st.Cursor(true)
 		defer it.Close()
 
 		for it.Seek([]byte{2}); it.Valid(); it.Next() {
@@ -752,7 +752,7 @@ func TestStoreIterator(t *testing.T) {
 		err := st.Put(k, []byte{1})
 		require.NoError(t, err)
 
-		it := st.Iterator(true)
+		it := st.Cursor(true)
 		defer it.Close()
 
 		it.Seek(nil)
@@ -772,7 +772,7 @@ func TestStoreIterator(t *testing.T) {
 		}
 
 		i := 0
-		it := st.Iterator(false)
+		it := st.Cursor(false)
 		defer it.Close()
 
 		for it.Seek(nil); it.Valid() && i < 50; it.Next() {
@@ -931,7 +931,7 @@ func TestStoreDelete(t *testing.T) {
 		require.Equal(t, []byte("FOO"), v)
 
 		// the deleted key must not appear on iteration
-		it := st.Iterator(false)
+		it := st.Cursor(false)
 		defer it.Close()
 		i := 0
 		for it.Seek(nil); it.Valid(); it.Next() {
@@ -1023,7 +1023,7 @@ func TestStoreTruncate(t *testing.T) {
 		err = st.Truncate()
 		require.NoError(t, err)
 
-		it := st.Iterator(false)
+		it := st.Cursor(false)
 		defer it.Close()
 		it.Seek(nil)
 		require.NoError(t, it.Err())
